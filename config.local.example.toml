@@ -1,0 +1,13 @@
+# Copy to config.local.toml and keep only the lines you need. It overrides
+# config.toml and is git-ignored, so your machine's settings stay yours.
+
+[data]
+voicebank_dir = "/path/to/VoiceBank-DEMAND-16k/data"
+# train_dir = "/path/to/mixtures" # e.g. made by denoiser/make_mixtures.py
+# val_dir = "/path/to/mixtures"
+# device = "cpu"
+# audio_device = "cpu" # keep train.py's training audio in RAM; only one batch at a time on the GPU
+
+[train]
+# batch_size = 256
+# max_train = 2000

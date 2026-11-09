@@ -1,0 +1,116 @@
+# Shared default settings. Don't put personal settings here: anything that
+# depends on your machine (dataset path, device, sizes that must fit your
+# VRAM) goes in config.local.toml, which overrides these keys and is
+# git-ignored. A single run can override either with --set, e.g.
+#   .venv/bin/python train.py --set train.epochs=5 --set stft.causal=false
+
+[data]
+voicebank_dir = "data/VoiceBank-DEMAND-16k/data" # the VoiceBank-DEMAND parquets, used for every split
+                                                 # below left at ""; relative paths are relative to this file
+train_dir = "" # folder with train-*.parquet; "" = voicebank_dir
+val_dir = "" # folder with val-*.parquet; "" = voicebank_dir, which has none, so its test-*.parquet
+             # (the test set itself) is used for validation
+test_dir = "" # folder with test-*.parquet; "" = voicebank_dir
+sample_rate = 16000 # Hz
+device = "" # "" = cuda if available, else cpu
+audio_device = "" # train.py: where the training audio is kept: "" = same as device, "cpu" saves VRAM
+vram_fraction = 0.9 # share of the GPU's memory PyTorch may use: the rest is left for the desktop when
+                    # it runs on the same GPU (a full GPU freezes the screen); 1 = no limit
+
+[stft]
+n_fft = 128 # Samples per frame. Tradeoff between either time or frequency resolution
+hop = 80 # How many samples the frame window moves between frames (must be less than n_fft)
+long_factor = 10 # Extra input from a window n_fft * long_factor samples long; 0 = off
+causal = true # Frames only see the past (needed live); false = centred frames
+
+[model]
+type = "mlp" # "mlp" (Multilayer Perceptron: each frame on its own) or "tcn" (Temporal Convolutional Network: convolutions over the past frames, see [tcn])
+hidden = [1024, 1024] # mlp only: hidden layer sizes
+output = "magnitude" # "magnitude" or "mask" (gain 0..1; both reuse the noisy phase), or "complex_mask" (also fixes phase)
+compress = 0.3 # complex_mask only: magnitude exponent, squeezes the range like log1p
+mag_weight = 0.7 # complex_mask only: loss weight of magnitude vs real/imag MSE
+mag_input = true # complex_mask only: also give the model the log1p magnitude, not just real/imag
+mask_bound = 1.5 # complex_mask only: soft limit (tanh) on the mask's size, phase stays free; it acts on
+                 # the compressed spectrum, so 1.5 allows a gain of 1.5 ** (1 / compress) ~ 3.9; 0 = no limit
+
+[tcn]
+channels = 256
+kernel = 3 # frames per convolution
+dilations = [1, 2, 4, 8, 16, 32] # one residual block each; sees 1 + (kernel - 1) * sum(dilations) frames
+
+[train]
+epochs = 10
+lr = 1e-3
+lr_schedule = "step" # how the lr changes, set per batch: "step" (StepLR, below) or "wsd" (warmup-stable-decay:
+                     # lr for most of the run, then a cosine down to lr_end; good for long runs, and a
+                     # checkpoint from the stable part is a fine place to continue or branch from)
+warmup_steps = 0 # both: batches at the start where the lr rises linearly from ~0 to lr; ~1000 for a long run
+lr_step = 0 # step: every this many epochs the lr is multiplied by lr_gamma; 0 = constant lr
+lr_gamma = 0.5
+decay_share = 0.2 # wsd: the last share (0..1) of all batches, where the lr decays; 0.1-0.2 is typical
+lr_end = 1e-5 # wsd: the lr at the last batch
+batch_size = 128 # frames per batch (crops per batch = batch_size / crop_frames)
+crop_frames = 1 # consecutive frames per training example; 1 is fine for the mlp, tcn wants ~100-300
+max_train = 2000 # clips; 0 = all (VoiceBank: 11572). All clips are held in RAM
+max_val = 256 # validation clips; 0 = all (VoiceBank: its 824 test clips)
+clean_share = 0.05 # share (0..1) of training crops whose noisy input is swapped for the clean speech, so the
+                # model also learns to leave clean speech alone; 0.05-0.1 is a reasonable range
+num_samples = 10 # clean/noisy/denoised triples saved after training
+output_dir = "runs/default"
+save_checkpoints = 0 # besides the final model.pt, after each epoch: 0 = nothing, 1 = every epoch (epoch_NNN.pt),
+                     # 2 = the best so far (best.pt), 3 = the 3 best (best_epoch_NNN.pt); "best" = val_loss
+                     # in train.py, val_PESQ in train_pesq.py
+init_from = "" # train.py: a model.pt to continue training from; "" = start fresh
+
+[filterbank]
+# A learned encoder/decoder that can replace the STFT (denoiser/filterbank.py). train_filterbank.py
+# trains it (step 1 of two-step training); compare_oracles.py compares it to the STFT. train.py and
+# train_pesq.py don't use it yet.
+filters = 256 # channels of the latent: the learned counterpart of frequency bins
+kernel = 32 # samples per frame (2 ms at 16 kHz)
+stride = 16 # samples between frames (1000 frames/s at 16 kHz); at most kernel
+relu = true # non-negative latent (as Conv-TasNet); false = linear encoder
+epochs = 30
+lr = 1e-3
+lr_end = 1e-5 # lr decays exponentially from lr to this over the epochs; = lr for a constant lr
+batch_size = 16 # crops per batch
+crop_seconds = 2.0 # length of each training crop; shorter clips are skipped
+max_train = 2000 # clips; "" or 0 = all (VoiceBank: 11572). All clips are held in RAM
+max_val = 100 # validation clips, cropped like the training ones; "" or 0 = all
+pesq_weight = 0 # loss = -SNR / 10 + pesq_weight * PESQ loss (train_pesq.py's, ~1); 0 = SNR only
+output_dir = "runs/filterbank"
+
+[mix]
+# denoiser/make_mixtures.py: writes fixed-length train/val mixtures for data.train_dir / data.val_dir.
+# Relative paths are relative to this file; set your own in config.local.toml.
+vctk_dir = "data/VCTK-Corpus-0.92" # holds speaker-info.txt and wav48_silence_trimmed/
+demand_dir = "data/DEMAND-16k" # one folder per environment, each with ch01.wav (16 kHz)
+voicebank_logs = "data/VoiceBank-DEMAND-16k/logfiles" # log_trainset_28spk.txt, log_testset.txt
+vctk_mic = "mic1" # VCTK has two microphones per utterance
+vctk_level = -24.0 # dBFS of the speech frames each VCTK utterance is scaled to: VoiceBank's training
+                  # speech averages ~-24 (its test set ~-22), VCTK as recorded ~-28
+seconds = 8.0 # length of every clip
+snr_min = 0.0 # dB; each clip's SNR is drawn uniformly from snr_min..snr_max
+snr_max = 20.0
+voicebank_passes = 3 # voicebank recipe: mixtures of all the training speech, each with new noise and SNRs
+vctk_passes = 1 # vctk_demand recipe: the same; VCTK has ~4x VoiceBank's speech already
+val_speakers = 8 # VCTK speakers in neither VoiceBank set, half of each gender, for validation only
+val_noise_share = 0.1 # share of each noise kept for validation only
+pause_min = 0.05 # seconds of an utterance's own silence kept at each end when joining (random in between)
+pause_max = 0.25
+crossfade = 0.05 # seconds; voicebank recipe: crossfade between joined noise pieces
+seed = 0
+
+[pesq]
+# train_pesq.py: loss = PESQ loss + mse_weight * MSE / mse_scale + stoi_weight * (1 - STOI) / stoi_scale
+# The scales are typical values of each term, so a weight of 1 makes that term count about as much
+# as the PESQ loss (~1). MSE is train.py's frame loss and keeps the spectrum close to the clean one;
+# STOI keeps speech intelligible. PESQ alone tends to remove noise at the cost of a thin, tinny sound.
+mse_weight = 0 # 1 or 0 is on or off
+mse_scale = 0.003
+stoi_weight = 0 # 1 or 0 is on or off
+stoi_scale = 0.1
+init_from = "" # train_pesq.py: the model.pt to fine-tune (separate from train.init_from); "" = start fresh
+batch_size = 8 # clips per batch
+crop_seconds = 2.0 # length of each training piece, from a random start; shorter clips are left out (2 s keeps ~87% of them)
+crop_step = 1 # seconds; validation clips are cut to a multiple of this (few lengths = fast on the GPU)

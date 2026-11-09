@@ -1,0 +1,12 @@
+# Personal settings (copy config.local.example.toml to make one)
+config.local.toml
+
+# Environment and caches
+.venv/
+__pycache__/
+
+# Training output and checkpoints
+runs/
+output*/
+old_runs/
+*.pt
