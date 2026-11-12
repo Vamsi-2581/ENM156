@@ -29,8 +29,8 @@ def split_files(cfg, split):
     return files
 
 
-def load_pairs(files, max_pairs, sample_rate):
-    """Yield (noisy, clean) float32 waveforms one clip at a time, each pair
+def load_pairs(files, max_pairs, sample_rate, dtype="float32"):
+    """Yield (noisy, clean) waveforms (float32, or the files' 16-bit values with dtype="int16") one clip at a time, each pair
     cut to the shorter length; a blank or 0 `max_pairs` reads every clip.
     Files are read a few clips at a time: a whole file would take ~1.4 GB of
     RAM while it's decoded."""
@@ -40,8 +40,8 @@ def load_pairs(files, max_pairs, sample_rate):
             for noisy, clean in zip(batch.column("noisy"), batch.column("clean")):
                 if max_pairs and count >= max_pairs:
                     return
-                n, nsr = sf.read(io.BytesIO(noisy.as_py()["bytes"]), dtype="float32")
-                c, csr = sf.read(io.BytesIO(clean.as_py()["bytes"]), dtype="float32")
+                n, nsr = sf.read(io.BytesIO(noisy.as_py()["bytes"]), dtype=dtype)
+                c, csr = sf.read(io.BytesIO(clean.as_py()["bytes"]), dtype=dtype)
                 assert csr == sample_rate and nsr == sample_rate
                 length = min(len(n), len(c))
                 yield n[:length], c[:length]
@@ -50,8 +50,14 @@ def load_pairs(files, max_pairs, sample_rate):
 
 
 def load_crops(files, max_clips, sample_rate, crop):
-    """Clips at least `crop` samples long, as (noisy, clean) float32 arrays."""
-    return [(n, c) for n, c in load_pairs(files, max_clips, sample_rate) if len(n) >= crop]
+    """Clips at least `crop` samples long, as (noisy, clean) int16 arrays: the
+    16-bit values of the files, half the RAM of float32. random_crops and
+    first_crops turn their pieces into floats."""
+    return [(n, c) for n, c in load_pairs(files, max_clips, sample_rate, "int16") if len(n) >= crop]
+
+
+def to_float(int16_wav, device):
+    return int16_wav.to(device).float() / 32768
 
 
 def random_crops(pairs, crop, device):
@@ -61,14 +67,14 @@ def random_crops(pairs, crop, device):
     starts = [random.randint(0, len(n) - crop) for n, _ in pairs]
     noisy = torch.stack([torch.from_numpy(n[s:s + crop]) for (n, _), s in zip(pairs, starts)])
     clean = torch.stack([torch.from_numpy(c[s:s + crop]) for (_, c), s in zip(pairs, starts)])
-    return noisy.to(device), clean.to(device)
+    return to_float(noisy, device), to_float(clean, device)
 
 
 def first_crops(pairs, crop, device):
     """The first `crop` samples of every pair: the same validation set each epoch."""
     noisy = torch.stack([torch.from_numpy(n[:crop]) for n, _ in pairs])
     clean = torch.stack([torch.from_numpy(c[:crop]) for _, c in pairs])
-    return noisy.to(device), clean.to(device)
+    return to_float(noisy, device), to_float(clean, device)
 
 
 def stack_and_free(chunks, device, trim_every=256):
