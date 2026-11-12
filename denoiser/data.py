@@ -29,17 +29,21 @@ def split_files(cfg, split):
     return files
 
 
-def load_pairs(files, max_pairs, sample_rate, dtype="float32"):
+def load_pairs(files, max_pairs, sample_rate, dtype="float32", every=1):
     """Yield (noisy, clean) waveforms (float32, or the files' 16-bit values with dtype="int16") one clip at a time, each pair
     cut to the shorter length; a blank or 0 `max_pairs` reads every clip.
     Files are read a few clips at a time: a whole file would take ~1.4 GB of
-    RAM while it's decoded."""
-    count = 0
+    RAM while it's decoded. every = N keeps each Nth clip only: the files are
+    sorted by speaker, so this thins the set out evenly, unlike max_pairs."""
+    count, seen = 0, -1
     for f in files:
         for batch in pq.ParquetFile(str(f)).iter_batches(batch_size=64, columns=["noisy", "clean"]):
             for noisy, clean in zip(batch.column("noisy"), batch.column("clean")):
                 if max_pairs and count >= max_pairs:
                     return
+                seen += 1
+                if seen % every:
+                    continue
                 n, nsr = sf.read(io.BytesIO(noisy.as_py()["bytes"]), dtype=dtype)
                 c, csr = sf.read(io.BytesIO(clean.as_py()["bytes"]), dtype=dtype)
                 assert csr == sample_rate and nsr == sample_rate
@@ -49,11 +53,11 @@ def load_pairs(files, max_pairs, sample_rate, dtype="float32"):
         release_freed_memory()
 
 
-def load_crops(files, max_clips, sample_rate, crop):
+def load_crops(files, max_clips, sample_rate, crop, every=1):
     """Clips at least `crop` samples long, as (noisy, clean) int16 arrays: the
     16-bit values of the files, half the RAM of float32. random_crops and
     first_crops turn their pieces into floats."""
-    return [(n, c) for n, c in load_pairs(files, max_clips, sample_rate, "int16") if len(n) >= crop]
+    return [(n, c) for n, c in load_pairs(files, max_clips, sample_rate, "int16", every) if len(n) >= crop]
 
 
 def to_float(int16_wav, device):
