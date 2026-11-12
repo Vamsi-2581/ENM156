@@ -17,24 +17,15 @@ import torch
 from denoiser.config import (add_config_args, describe_device, get_device, load_config,
                              log_output, print_config, resolve_path)
 from denoiser.data import (epoch_crops, gather_segments, load_pairs, release_freed_memory,
-                           split_files, stack_waves, swap_in_clean)
+                           sample_ladder, split_files, stack_waves, swap_in_clean)
 from denoiser.model import CheckpointSaver, LrSchedule, describe_model, initial_model, save_checkpoint
 from denoiser.pipeline import loss_fn, save_samples, segment_frames
 
 
-def load_split(files, cfg, max_pairs, audio_device, keep_raw=0):
-    """All clips of a split as Waves on `audio_device`, plus the first
-    `keep_raw` raw (noisy, clean) pairs, for sample output. The frames are
-    made from the audio batch by batch: stored, they'd take ~8x the memory."""
-    raw_pairs = []
-
-    def pairs():
-        for pair in load_pairs(files, max_pairs, cfg["data"]["sample_rate"]):
-            if len(raw_pairs) < keep_raw:
-                raw_pairs.append(pair)
-            yield pair
-
-    return stack_waves(pairs(), cfg, audio_device), raw_pairs
+def load_split(files, cfg, max_pairs, audio_device):
+    """All clips of a split as Waves on `audio_device`. The frames are made
+    from the audio batch by batch: stored, they'd take ~8x the memory."""
+    return stack_waves(load_pairs(files, max_pairs, cfg["data"]["sample_rate"]), cfg, audio_device)
 
 
 def crop_batch(waves, clips, first, crop, history, cfg, device, clean_share=0):
@@ -75,11 +66,9 @@ def main():
     print(describe_model(cfg))
 
     print(f"Loading up to {tr['max_train'] or 'all'} train pairs...")
-    train, _ = load_split(split_files(cfg, "train"), cfg, tr["max_train"], audio_device)
-    print(f"Loading up to {tr['max_val'] or 'all'} val pairs "
-          f"(keeping {tr['num_samples']} raw clips for sample output)...")
-    val, val_raw_pairs = load_split(split_files(cfg, "val"), cfg, tr["max_val"], audio_device,
-                                    keep_raw=tr["num_samples"])
+    train = load_split(split_files(cfg, "train"), cfg, tr["max_train"], audio_device)
+    print(f"Loading up to {tr['max_val'] or 'all'} val pairs...")
+    val = load_split(split_files(cfg, "val"), cfg, tr["max_val"], audio_device)
     release_freed_memory()
     print(f"  train: {len(train.frames)} clips, {int(train.frames.sum())} frames   "
           f"val: {len(val.frames)} clips, {int(val.frames.sum())} frames")
@@ -119,7 +108,8 @@ def main():
     save_checkpoint(model, cfg, out_dir / "model.pt")
     print(f"Saved model to {out_dir / 'model.pt'}")
 
-    save_samples(model, val_raw_pairs, cfg, device, out_dir)
+    if tr["num_samples"]:
+        save_samples(model, sample_ladder(cfg), cfg, device, out_dir)
 
 
 if __name__ == "__main__":

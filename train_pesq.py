@@ -19,7 +19,8 @@ import torch
 
 from denoiser.config import (add_config_args, describe_device, get_device, load_config,
                              log_output, print_config, resolve_path)
-from denoiser.data import load_crops, load_pairs, random_crops, split_files, swap_in_clean
+from denoiser.data import (load_crops, load_pairs, random_crops, sample_ladder, split_files,
+                           swap_in_clean)
 from denoiser.model import CheckpointSaver, LrSchedule, describe_model, initial_model, save_checkpoint
 from denoiser.features import analysis
 from denoiser.pesq_loss import make_pesq_loss
@@ -156,7 +157,8 @@ def main():
     save_checkpoint(model, cfg, out_dir / "model.pt")
     print(f"Saved model to {out_dir / 'model.pt'}")
 
-    save_samples(model, val[:tr["num_samples"]], cfg, device, out_dir)
+    if tr["num_samples"]:
+        save_samples(model, sample_ladder(cfg), cfg, device, out_dir)
 
 
 if __name__ == "__main__":

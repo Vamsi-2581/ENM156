@@ -221,14 +221,16 @@ def denoise(model, noisy_wav, cfg, device):
         return enhance(model, wav, cfg)[0, :len(noisy_wav)].cpu().numpy()
 
 
-def save_samples(model, pairs, cfg, device, out_dir):
+def save_samples(model, clips, cfg, device, out_dir):
+    """clips: [(name, noisy, clean)], e.g. data.sample_ladder(): one folder
+    per clip with the clean, noisy and denoised audio."""
     samples_dir = Path(out_dir) / "samples"
     samples_dir.mkdir(exist_ok=True)
     sr = cfg["data"]["sample_rate"]
-    for i, (noisy_wav, clean_wav) in enumerate(pairs):
-        sample_dir = samples_dir / f"{i:03d}"
+    for name, noisy_wav, clean_wav in clips:
+        sample_dir = samples_dir / name
         sample_dir.mkdir(exist_ok=True)
         sf.write(str(sample_dir / "clean.wav"), clean_wav, sr)
         sf.write(str(sample_dir / "noisy.wav"), noisy_wav, sr)
         sf.write(str(sample_dir / "denoised.wav"), denoise(model, noisy_wav, cfg, device), sr)
-    print(f"Saved {len(pairs)} clean/noisy/denoised sample triples to {samples_dir}/")
+    print(f"Saved {len(clips)} clean/noisy/denoised sample triples to {samples_dir}/")

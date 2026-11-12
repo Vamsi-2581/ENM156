@@ -53,6 +53,32 @@ def load_pairs(files, max_pairs, sample_rate, dtype="float32", every=1):
         release_freed_memory()
 
 
+SAMPLE_SNRS = (None, 30, 20, 15, 10, 5, 0, -5, -10, -15)  # dB; None = no noise at all
+
+
+def sample_ladder(cfg):
+    """The clips of the sample output, [(name, noisy, clean)]: the same
+    validation clips for every model (evenly spread over the split, so over
+    its speakers and noises), each remixed to a fixed SNR, from no noise to
+    far more noise than speech. Sorted by name they go from clean to worst.
+    The SNR is speech power over noise power of the whole clip; a mix that
+    would clip is turned down, together with its clean reference."""
+    files = split_files(cfg, "val")
+    total = sum(pq.ParquetFile(str(f)).metadata.num_rows for f in files)
+    pairs = load_pairs(files, 0, cfg["data"]["sample_rate"], every=max(total // len(SAMPLE_SNRS), 1))
+    ladder = []
+    for i, (snr, (noisy, clean)) in enumerate(zip(SAMPLE_SNRS, pairs)):
+        noise = noisy - clean
+        if snr is None:
+            mix, name = clean.copy(), f"{i:02d}_no_noise"
+        else:
+            gain = ((clean ** 2).mean() / ((noise ** 2).mean() * 10 ** (snr / 10) + 1e-12)) ** 0.5
+            mix, name = clean + gain * noise, f"{i:02d}_snr_{snr:+d}dB"
+        scale = min(1.0, 0.99 / max(abs(mix).max(), 1e-9))
+        ladder.append((name, (mix * scale).astype("float32"), (clean * scale).astype("float32")))
+    return ladder
+
+
 def load_crops(files, max_clips, sample_rate, crop, every=1):
     """Clips at least `crop` samples long, as (noisy, clean) int16 arrays: the
     16-bit values of the files, half the RAM of float32. random_crops and
