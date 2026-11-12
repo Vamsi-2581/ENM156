@@ -109,16 +109,16 @@ def cache_key(files, sample_rate):
     return [sample_rate] + [[f.name, f.stat().st_size, f.stat().st_mtime_ns] for f in files]
 
 
-def load_cache(key):
+def load_cache(key, cache_path=CACHE_PATH):
     try:
-        data = json.loads(resolve_path(CACHE_PATH).read_text())
+        data = json.loads(resolve_path(cache_path).read_text())
     except (OSError, ValueError):
         return []
     return data["clips"] if data.get("key") == key else []
 
 
-def save_cache(key, clips):
-    path = resolve_path(CACHE_PATH)
+def save_cache(key, clips, cache_path=CACHE_PATH):
+    path = resolve_path(cache_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"key": key, "clips": clips}))
 
@@ -138,6 +138,9 @@ def main():
     ap.add_argument("--model", default="runs/default/model.pt",
                     help="Instead, run this model.pt over test clips and score it.")
     ap.add_argument("--num-clips", type=int, default=824)
+    ap.add_argument("--split", default="test", choices=("test", "val"),
+                    help="val: for choosing between models, so the test set stays untouched.")
+    ap.add_argument("--every", type=int, default=1, help="Score each Nth clip of the split only.")
     add_config_args(ap)
     args = ap.parse_args()
     cfg = load_config(args.set)
@@ -145,15 +148,18 @@ def main():
     if args.model:
         device = get_device(cfg)
         model, model_cfg = load_checkpoint(args.model, cfg, device)
-        print(f"Evaluating {args.model} on {args.num_clips} test clips...")
+        print(f"Evaluating {args.model} on up to {args.num_clips} {args.split} clips"
+              + (f", each {args.every}th" if args.every > 1 else "") + "...")
         print(f"  {describe_model(model_cfg)}")
-        files, sr = split_files(cfg, "test"), cfg["data"]["sample_rate"]
-        key = cache_key(files, sr)
-        cached = load_cache(key)
+        files, sr = split_files(cfg, args.split), cfg["data"]["sample_rate"]
+        key = cache_key(files, sr) + ([args.every] if args.every > 1 else [])
+        cache = CACHE_PATH if (args.split, args.every) == ("test", 1) else \
+            CACHE_PATH.replace(".json", f"_{args.split}_{args.every}.json")
+        cached = load_cache(key, cache)
         results, fixed = evaluate_model(lambda wav: denoise(model, wav, model_cfg, device),
-                                        load_pairs(files, args.num_clips, sr), cached)
+                                        load_pairs(files, args.num_clips, sr, every=args.every), cached)
         if len(fixed) > len(cached):
-            save_cache(key, fixed)
+            save_cache(key, fixed, cache)
     else:
         samples_dir = args.samples_dir or resolve_path(cfg["train"]["output_dir"]) / "samples"
         print(f"Evaluating samples in {samples_dir}...")
