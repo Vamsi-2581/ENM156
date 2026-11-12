@@ -23,7 +23,7 @@ from denoiser.data import load_crops, load_pairs, random_crops, split_files, swa
 from denoiser.model import CheckpointSaver, LrSchedule, describe_model, initial_model, save_checkpoint
 from denoiser.features import analysis
 from denoiser.pesq_loss import make_pesq_loss
-from denoiser.pipeline import enhance, loss_fn, run_model, save_samples, target_frames
+from denoiser.pipeline import enhance, filterbank, loss_fn, run_model, save_samples, target_frames
 
 
 def whole_clip(pair, device, step):
@@ -52,6 +52,8 @@ class CombinedLoss:
     def __init__(self, cfg, device, sample_rate):
         self.cfg, self.p = cfg, cfg["pesq"]
         self.pesq = make_pesq_loss(device, sample_rate)
+        if self.p["mse_weight"] and filterbank(cfg) is not None:
+            raise SystemExit("pesq.mse_weight must be 0 with model.filterbank: the MSE term is on STFT frames")
         self.stoi = None
         if self.p["stoi_weight"]:
             from torch_stoi import NegSTOILoss  # only needed for the STOI term

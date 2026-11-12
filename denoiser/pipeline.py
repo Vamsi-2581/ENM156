@@ -4,6 +4,8 @@ What the model sees and predicts, for every combination of settings:
   input  = short noisy frame (log1p magnitude, or compressed real/imag for
            complex_mask, then its log1p magnitude if model.mag_input)
            + pooled long-window frame if stft.long_factor > 0
+           (with model.filterbank: the compressed latent of that frozen learned
+           filterbank instead, and the output is a 0..1 mask on the latent)
   output = magnitude:    clean log1p magnitude (noisy phase reused)
            mask:         gain in 0..1 per bin for the noisy magnitude (noisy
                          phase reused); scored on the log1p magnitude it gives
@@ -16,11 +18,37 @@ import soundfile as sf
 import torch
 import torch.nn.functional as F
 
+from .config import resolve_path
 from .features import (analysis, apply_mask, compress, decompress, frame_spectrum, from_frames,
                        front_padding, magnitude, pool_long_mag, synthesis, to_frames, widest_window)
+from .filterbank import load_filterbank
 
 OUTPUTS = ("magnitude", "mask", "complex_mask")
 OUT_ACTIVATIONS = {"magnitude": "relu", "mask": "sigmoid", "complex_mask": None}
+
+
+_banks = {}  # (path, device) -> loaded filterbank
+
+
+def filterbank(cfg, device="cpu"):
+    """The learned filterbank (train_filterbank.py) that stands in for the
+    STFT when model.filterbank is set, else None. It is frozen: only the
+    network that predicts the mask on its latent is trained."""
+    path = cfg["model"].get("filterbank")
+    if not path:
+        return None
+    if cfg["model"]["output"] != "mask":
+        raise SystemExit('model.filterbank needs model.output = "mask"')
+    key = (path, str(device))
+    if key not in _banks:
+        _banks[key] = load_filterbank(resolve_path(path), device).eval().requires_grad_(False)
+    return _banks[key]
+
+
+def hop(cfg):
+    """Samples between frames."""
+    bank = filterbank(cfg)
+    return bank.stride if bank is not None else cfg["stft"]["hop"]
 
 
 def n_freq(cfg):
@@ -53,6 +81,9 @@ def mag_input(cfg):
 
 
 def io_sizes(cfg):
+    bank = filterbank(cfg)
+    if bank is not None:
+        return bank.enc.out_channels, bank.enc.out_channels
     n_short = n_freq(cfg) * (2 if is_complex(cfg) else 1)
     n_mag = n_freq(cfg) if mag_input(cfg) else 0
     n_long = n_freq(cfg) if cfg["stft"]["long_factor"] else 0
@@ -144,6 +175,12 @@ def enhance(model, noisy_wav, cfg):
 def run_model(model, noisy_wav, cfg):
     """enhance(), also returning the model's output and input frames, so a
     frame loss (loss_fn) can be computed from the same forward pass."""
+    bank = filterbank(cfg, noisy_wav.device)
+    if bank is not None:
+        z = bank.encode(noisy_wav)  # (B, filters, T)
+        x = (z.sign() * z.abs() ** cfg["model"]["compress"]).transpose(1, 2)
+        pred = model(x)
+        return bank.decode(pred.transpose(1, 2) * z, noisy_wav.shape[-1]), pred, x
     spec, x = features(noisy_wav, cfg)
     pred = model(x)
     return synthesis(output_spec(pred, x, spec, cfg), cfg["stft"], noisy_wav.shape[-1]), pred, x
@@ -176,7 +213,12 @@ def denoise(model, noisy_wav, cfg, device):
     model.eval()
     with torch.no_grad():
         wav = torch.from_numpy(noisy_wav).to(device)[None]
-        return enhance(model, wav, cfg)[0].cpu().numpy()
+        if filterbank(cfg) is not None:
+            # silence up to a whole second: the GPU's convolution library tunes the
+            # filterbank's convolutions for every new length, which takes seconds.
+            # Everything is causal, so the samples before the padding don't change
+            wav = F.pad(wav, (0, -len(noisy_wav) % cfg["data"]["sample_rate"]))
+        return enhance(model, wav, cfg)[0, :len(noisy_wav)].cpu().numpy()
 
 
 def save_samples(model, pairs, cfg, device, out_dir):

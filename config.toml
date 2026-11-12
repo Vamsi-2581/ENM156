@@ -32,6 +32,8 @@ mag_weight = 0.7 # complex_mask only: loss weight of magnitude vs real/imag MSE
 mag_input = true # complex_mask only: also give the model the log1p magnitude, not just real/imag
 mask_bound = 1.5 # complex_mask only: soft limit (tanh) on the mask's size, phase stays free; it acts on
                  # the compressed spectrum, so 1.5 allows a gain of 1.5 ** (1 / compress) ~ 3.9; 0 = no limit
+filterbank = "" # a filterbank.pt from train_filterbank.py: its frozen encoder/decoder replaces the STFT
+                # (needs output = "mask"; train_pesq.py without the MSE term, not train.py or streaming)
 
 [tcn]
 channels = 256
@@ -64,8 +66,8 @@ init_from = "" # train.py: a model.pt to continue training from; "" = start fres
 
 [filterbank]
 # A learned encoder/decoder that can replace the STFT (denoiser/filterbank.py). train_filterbank.py
-# trains it (step 1 of two-step training); compare_oracles.py compares it to the STFT. train.py and
-# train_pesq.py don't use it yet.
+# trains it (step 1 of two-step training); compare_oracles.py compares it to the STFT;
+# model.filterbank lets train_pesq.py train a denoiser on it.
 filters = 256 # channels of the latent: the learned counterpart of frequency bins
 kernel = 32 # samples per frame (2 ms at 16 kHz)
 stride = 16 # samples between frames (1000 frames/s at 16 kHz); at most kernel

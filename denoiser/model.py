@@ -7,7 +7,8 @@ import torch
 
 from .config import MODEL_SECTIONS, merge, resolve_path
 from .nets import MLP, TCN
-from .pipeline import check_stft, io_sizes, is_complex, n_freq, out_activation
+from .filterbank import describe_filterbank
+from .pipeline import check_stft, filterbank, hop, io_sizes, is_complex, n_freq, out_activation
 
 MODEL_TYPES = ("mlp", "tcn")
 
@@ -43,9 +44,9 @@ def make_model(cfg):
 def describe_net(cfg):
     n_in, n_out = io_sizes(cfg)
     if model_type(cfg) == "tcn":
-        tcn, stft = cfg["tcn"], cfg["stft"]
+        tcn = cfg["tcn"]
         history = (tcn["kernel"] - 1) * sum(tcn["dilations"])
-        ms = history * stft["hop"] / cfg["data"]["sample_rate"] * 1000
+        ms = history * hop(cfg) / cfg["data"]["sample_rate"] * 1000
         return (f"tcn {n_in} -> {tcn['channels']} channels x {len(tcn['dilations'])} blocks "
                 f"(dilations {tcn['dilations']}) -> {n_out}, sees {history + 1} frames "
                 f"({ms:.0f} ms of history)")
@@ -55,6 +56,11 @@ def describe_net(cfg):
 def describe_model(cfg):
     stft = cfg["stft"]
     sr = cfg["data"]["sample_rate"]
+    bank = filterbank(cfg)
+    if bank is not None:
+        fb = {"filters": bank.enc.out_channels, "kernel": bank.kernel, "stride": bank.stride, "relu": bank.relu}
+        return (f"{cfg['model']['output']} {describe_net(cfg)}; frozen "
+                f"{describe_filterbank(fb, sr)} from {cfg['model']['filterbank']}")
     long = (f", long window {stft['n_fft'] * stft['long_factor']} samples "
             f"({stft['n_fft'] * stft['long_factor'] / sr * 1000:.0f} ms)" if stft["long_factor"] else "")
     return (f"{cfg['model']['output']} {describe_net(cfg)}; "
@@ -152,6 +158,7 @@ def load_checkpoint(path, cfg, device):
         # complex_mask checkpoints from before these settings: real/imag input only, no limit
         stored["model"].setdefault("mag_input", False)
         stored["model"].setdefault("mask_bound", 0)
+        stored["model"].setdefault("filterbank", "")  # saved before it could replace the STFT
         merge(cfg, stored)
         state = checkpoint["state_dict"]
     else:
