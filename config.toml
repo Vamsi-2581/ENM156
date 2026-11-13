@@ -60,8 +60,9 @@ val_every = 1   # so this keeps every speaker, unlike max_train); the same for v
 seed = -1 # train_pesq.py: seeds the initial weights and the crops; -1 = different every run
 clean_share = 0.05 # share (0..1) of training crops whose noisy input is swapped for the clean speech, so the
                 # model also learns to leave clean speech alone; 0.05-0.1 is a reasonable range
-num_samples = 10 # 0 = none; otherwise clean/noisy/denoised triples are saved after training: always the
-                 # same validation clips, remixed from no noise down to -15 dB SNR (data.sample_ladder)
+num_samples = 8 # 0 = none; otherwise clean/noisy/denoised triples are saved after training: always the
+                # same validation clips, remixed in even steps from 15 dB down to -6 dB SNR; 8 = 3 dB steps
+                # (data.sample_ladder)
 output_dir = "runs/default"
 save_checkpoints = 2 # besides the final model.pt, after each epoch: 0 = nothing, 1 = every epoch (epoch_NNN.pt),
                      # 2 = the best so far (best.pt), 3 = the 3 best (best_epoch_NNN.pt); "best" = val_loss

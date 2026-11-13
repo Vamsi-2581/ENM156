@@ -53,27 +53,27 @@ def load_pairs(files, max_pairs, sample_rate, dtype="float32", every=1):
         release_freed_memory()
 
 
-SAMPLE_SNRS = (None, 30, 20, 15, 10, 5, 0, -5, -10, -15)  # dB; None = no noise at all
+SAMPLE_SNR_RANGE = (15, -6)  # dB, first and last sample clip
 
 
 def sample_ladder(cfg):
     """The clips of the sample output, [(name, noisy, clean)]: the same
     validation clips for every model (evenly spread over the split, so over
-    its speakers and noises), each remixed to a fixed SNR, from no noise to
-    far more noise than speech. Sorted by name they go from clean to worst.
+    its speakers and noises), each remixed to a fixed SNR: train.num_samples
+    clips in even steps over SAMPLE_SNR_RANGE (8 clips = 3 dB steps). Sorted
+    by name they go from least to most noisy.
     The SNR is speech power over noise power of the whole clip; a mix that
     would clip is turned down, together with its clean reference."""
     files = split_files(cfg, "val")
     total = sum(pq.ParquetFile(str(f)).metadata.num_rows for f in files)
-    pairs = load_pairs(files, 0, cfg["data"]["sample_rate"], every=max(total // len(SAMPLE_SNRS), 1))
+    n, (first, last) = cfg["train"]["num_samples"], SAMPLE_SNR_RANGE
+    snrs = [round(first + (last - first) * i / max(n - 1, 1), 1) for i in range(n)]
+    pairs = load_pairs(files, 0, cfg["data"]["sample_rate"], every=max(total // max(n, 1), 1))
     ladder = []
-    for i, (snr, (noisy, clean)) in enumerate(zip(SAMPLE_SNRS, pairs)):
+    for i, (snr, (noisy, clean)) in enumerate(zip(snrs, pairs)):
         noise = noisy - clean
-        if snr is None:
-            mix, name = clean.copy(), f"{i:02d}_no_noise"
-        else:
-            gain = ((clean ** 2).mean() / ((noise ** 2).mean() * 10 ** (snr / 10) + 1e-12)) ** 0.5
-            mix, name = clean + gain * noise, f"{i:02d}_snr_{snr:+d}dB"
+        gain = ((clean ** 2).mean() / ((noise ** 2).mean() * 10 ** (snr / 10) + 1e-12)) ** 0.5
+        mix, name = clean + gain * noise, f"{i:02d}_snr_{snr:+g}dB"
         scale = min(1.0, 0.99 / max(abs(mix).max(), 1e-9))
         ladder.append((name, (mix * scale).astype("float32"), (clean * scale).astype("float32")))
     return ladder

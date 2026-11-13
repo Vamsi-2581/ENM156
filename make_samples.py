@@ -1,6 +1,6 @@
 """
 Writes a model's sample output again: clean/noisy/denoised triples of the
-same validation clips for every model, from no noise to -15 dB SNR (see
+same validation clips for every model, train.num_samples clips from 15 dB to -6 dB SNR (see
 data.sample_ladder), into <the model's folder>/samples, so models can be
 compared by ear on identical input.
 
