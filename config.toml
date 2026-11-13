@@ -30,7 +30,7 @@ output = "magnitude" # "magnitude" or "mask" (gain 0..1; both reuse the noisy ph
 compress = 0.3 # complex_mask only: magnitude exponent, squeezes the range like log1p
 mag_weight = 0.7 # complex_mask only: loss weight of magnitude vs real/imag MSE
 mag_input = true # complex_mask only: also give the model the log1p magnitude, not just real/imag
-mask_bound = 1.5 # complex_mask only: soft limit (tanh) on the mask's size, phase stays free; it acts on
+mask_bound = 1.0 # complex_mask only: soft limit (tanh) on the mask's size, phase stays free; it acts on
                  # the compressed spectrum, so 1.5 allows a gain of 1.5 ** (1 / compress) ~ 3.9; 0 = no limit
 filterbank = "" # a filterbank.pt from train_filterbank.py: its frozen encoder/decoder replaces the STFT
                 # (needs output = "mask"; train_pesq.py without the MSE term, not train.py or streaming)
@@ -63,7 +63,7 @@ clean_share = 0.05 # share (0..1) of training crops whose noisy input is swapped
 num_samples = 10 # 0 = none; otherwise clean/noisy/denoised triples are saved after training: always the
                  # same validation clips, remixed from no noise down to -15 dB SNR (data.sample_ladder)
 output_dir = "runs/default"
-save_checkpoints = 0 # besides the final model.pt, after each epoch: 0 = nothing, 1 = every epoch (epoch_NNN.pt),
+save_checkpoints = 2 # besides the final model.pt, after each epoch: 0 = nothing, 1 = every epoch (epoch_NNN.pt),
                      # 2 = the best so far (best.pt), 3 = the 3 best (best_epoch_NNN.pt); "best" = val_loss
                      # in train.py, val_PESQ in train_pesq.py
 init_from = "" # train.py: a model.pt to continue training from; "" = start fresh
