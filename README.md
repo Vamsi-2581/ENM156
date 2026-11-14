@@ -1,8 +1,9 @@
 # Speech denoiser
 
 A small causal network that removes noise from speech, trained on
-VoiceBank-DEMAND-16k: a frame-by-frame MLP, or a TCN that also looks at
-the past half second (`model.type`). Frames are causal by default, so the same model can
+VoiceBank-DEMAND-16k: a frame-by-frame MLP, a TCN that also looks at
+the past half second, or a spiking network (SNN) that remembers the past in
+its neurons (`model.type`). Frames are causal by default, so the same model can
 run live (`denoiser/stream.py`) with a latency of one short window.
 
 ## Setup
@@ -33,6 +34,10 @@ training audio doesn't fit in your VRAM.
 .venv/bin/python tests/test_stream.py                       # live output == offline output
 .venv/bin/python tests/test_crops.py                        # training crops == whole clips
 .venv/bin/python tests/test_filterbank.py                   # learned filterbank framing
+.venv/bin/python train_pesq.py --set model.type=snn --set pesq.init_from= --set train.output_dir=runs/snn   # spiking network
+.venv/bin/python tests/test_snn_neurons.py                  # spiking neurons on hand-made inputs
+.venv/bin/python tests/test_snn_stream.py                   # spiking network: live == offline == frame by frame
+.venv/bin/python tests/test_snn_stats.py                    # operation counts against counts by hand
 ```
 
 Each checkpoint stores the `stft` and `model` settings it was trained with,
@@ -60,6 +65,9 @@ types out, and validate on VCTK speakers that VoiceBank doesn't use (`[mix]`).
 | `denoiser/features.py` | causal / centred STFT, long-window pooling, compression |
 | `denoiser/pipeline.py` | model inputs, targets, loss and output for each setting |
 | `denoiser/nets.py` | the networks (MLP, TCN) |
+| `denoiser/snn/neurons.py` | spiking neurons (leaky integrate-and-fire, leaky readout) |
+| `denoiser/snn/nets.py` | the spiking networks; settings in `[snn]` |
+| `denoiser/snn/stats.py` | operations per frame and the energy estimate `evaluate.py` prints |
 | `denoiser/model.py` | building the configured network, checkpoints |
 | `denoiser/filterbank.py` | learned encoder/decoder that can replace the STFT (not used by the denoiser yet) |
 | `denoiser/stream.py` | live, chunk-by-chunk denoising |

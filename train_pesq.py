@@ -73,6 +73,9 @@ class CombinedLoss:
         if self.stoi is not None:
             terms["stoi"] = -self.stoi(est, clean).mean()
             total = total + self.p["stoi_weight"] * (1 - terms["stoi"]) / self.p["stoi_scale"]
+        if getattr(model, "spike_rate", None) is not None:  # spiking model: spikes per neuron per step
+            terms["rate"] = model.spike_rate
+            total = total + self.cfg["snn"]["rate_weight"] * terms["rate"]
         return total, terms
 
 
@@ -104,7 +107,7 @@ def main():
     device = get_device(cfg)
     print(f"Using device: {describe_device(device)}")
     model, cfg = initial_model(cfg, device, cfg["pesq"]["init_from"])
-    print_config(cfg, ("stft", "model", "train", "pesq"))
+    print_config(cfg, ("stft", "model", *(("snn",) if cfg["model"]["type"] == "snn" else ()), "train", "pesq"))
     print(describe_model(cfg))
 
     print(f"Loading up to {tr['max_train'] or 'all'} train and {tr['max_val'] or 'all'} val clips...")

@@ -1,8 +1,10 @@
 """
 Live denoising: feed audio in chunks of stft.hop samples, get denoised
 chunks of the same size back. Uses the same causal frames, features and
-model as offline processing (the model sees its last `context` input frames), so the output equals pipeline.enhance on the
-whole recording, delayed by n_fft - hop samples.
+model as offline processing (the model sees its last `context` input frames,
+or carries its state from frame to frame if it is a spiking one), so the
+output equals pipeline.enhance on the whole recording, delayed by
+n_fft - hop samples.
 
   stream = StreamingDenoiser(model, cfg, device)
   for chunk in microphone_chunks(cfg["stft"]["hop"]):
@@ -12,6 +14,7 @@ import torch
 
 from .features import pool_long_mag, window
 from .pipeline import input_frames, output_spec
+from .snn.nets import SpikingModel
 
 
 class StreamingDenoiser:
@@ -32,6 +35,7 @@ class StreamingDenoiser:
         self.pending = torch.zeros(self.n_fft, device=device)
         self.envelope = torch.zeros(self.n_fft, device=device)
         self.frames = None  # the model's last `context` input frames, from the first chunk on
+        self.state = None  # of a spiking model, instead of those frames
 
     @property
     def latency(self):
@@ -52,11 +56,17 @@ class StreamingDenoiser:
             long_spec = torch.fft.rfft(self.history[-self.long_n_fft:] * self.long_window)[:, None]
             long = pool_long_mag(long_spec, self.long_factor)  # (1, F)
         x = input_frames(spec, long, self.cfg)  # (1, n_in)
-        if self.frames is None:  # silent frames before the start, as model() pads a clip
-            self.frames = torch.zeros(self.model.context, x.shape[-1], device=self.device)
-        self.frames = torch.cat([self.frames[1:], x])
-        # Recomputes the whole context each hop: simple, and exactly like offline
-        out = output_spec(self.model.forward_valid(self.frames), x, spec, self.cfg)[:, 0]
+        if isinstance(self.model, SpikingModel):
+            if self.state is None:  # at rest, as model() starts a clip
+                self.state = self.model.init_state((1,), self.device)
+            pred, self.state = self.model.step(x, self.state)
+        else:
+            if self.frames is None:  # silent frames before the start, as model() pads a clip
+                self.frames = torch.zeros(self.model.context, x.shape[-1], device=self.device)
+            self.frames = torch.cat([self.frames[1:], x])
+            # Recomputes the whole context each hop: simple, and exactly like offline
+            pred = self.model.forward_valid(self.frames)
+        out = output_spec(pred, x, spec, self.cfg)[:, 0]
         frame = torch.fft.irfft(out, n=self.n_fft) * self.window
 
         self.pending += frame
