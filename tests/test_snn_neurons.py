@@ -1,0 +1,62 @@
+"""
+Checks the spiking neurons on hand-made inputs: leak, threshold, reset, the
+stand-in gradient of a spike, and that a learnable decay gets a gradient.
+
+  .venv/bin/python tests/test_snn_neurons.py
+"""
+import sys
+from pathlib import Path
+
+import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from denoiser.snn.neurons import LIF, Leaky, spike  # noqa: E402
+
+
+def run(neuron, currents):
+    v, out = torch.zeros(1), []
+    for c in currents:
+        y, v = neuron.step(torch.tensor([c]), v)
+        out.append(round(y.item(), 4))
+    return out
+
+
+def main():
+    checks = {}
+
+    # decay 0.5, input 1 then nothing: the potential halves every step
+    checks["leak"] = run(Leaky(1, 0.5), [1, 0, 0]) == [1.0, 0.5, 0.25]
+
+    # decay 0.5, threshold 1, constant input 0.6: v = 0.6, 0.9, 1.05 -> spike, back to 0.05, ...
+    checks["threshold and reset"] = run(LIF(1, 0.5), [0.6] * 5) == [0, 0, 1, 0, 0]
+
+    # a big input leaves the rest above the threshold on the membrane: 2.5 -> spike, 1.5 stays
+    lif = LIF(1, 0.5)
+    _, v = lif.step(torch.tensor([2.5]), torch.zeros(1))
+    checks["reset by subtraction"] = abs(v.item() - 1.5) < 1e-6
+
+    # spikes are exactly 0 or 1; the gradient is 1 at the threshold and smaller away from it
+    x = torch.tensor([-1.0, 0.0, 1.0], requires_grad=True)
+    s = spike(x, 25.0)
+    s.sum().backward()
+    checks["spike values"] = s.tolist() == [0.0, 0.0, 1.0]
+    checks["surrogate gradient"] = (abs(x.grad[1].item() - 1) < 1e-6
+                                    and 0 < x.grad[0].item() < 0.01 and x.grad[0] == x.grad[2])
+
+    # the decay is trained through time
+    lif = LIF(4, 0.9)
+    v, total = torch.zeros(4), 0
+    for _ in range(5):
+        s, v = lif.step(torch.full((4,), 0.4), v)
+        total = total + s.sum()
+    total.backward()
+    checks["decay gets a gradient"] = lif.raw_decay.grad.abs().sum().item() > 0
+    checks["fixed decay"] = not LIF(4, 0.9, learn_decay=False).raw_decay.requires_grad
+
+    for name, ok in checks.items():
+        print(f"{'ok  ' if ok else 'FAIL'} {name}")
+    sys.exit(0 if all(checks.values()) else 1)
+
+
+if __name__ == "__main__":
+    main()

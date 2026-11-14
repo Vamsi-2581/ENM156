@@ -23,6 +23,7 @@ from denoiser.config import add_config_args, get_device, load_config, resolve_pa
 from denoiser.data import load_pairs, split_files
 from denoiser.model import describe_model, load_checkpoint
 from denoiser.pipeline import denoise
+from denoiser.snn.stats import CostMeter, describe_cost
 
 SAMPLE_RATE = 16000
 CACHE_PATH = "runs/eval_cache.json"
@@ -87,17 +88,20 @@ def load_samples_dir(samples_dir):
         yield clean, noisy, denoised
 
 
-def evaluate_model(denoise_fn, pairs, cached=()):
+def evaluate_model(denoise_fn, pairs, cached=(), after_noisy=lambda: None):
     """Also runs the clean clip through the model ("clean->model"), which
     shows how much the model distorts speech that has no noise to remove.
     cached: per-clip {"clean", "noisy"} scores from an earlier run, used for
-    the first len(cached) clips. Returns (results, per-clip clean/noisy scores)."""
+    the first len(cached) clips. after_noisy() is called after each noisy clip
+    has gone through the model. Returns (results, per-clip clean/noisy scores)."""
     scores, fixed = {}, []
     for i, (noisy, clean) in enumerate(pairs):
         row = cached[i] if i < len(cached) else {
             "clean": score_pair(clean, clean), "noisy": score_pair(clean, noisy)}
         fixed.append(row)
-        row = {**row, "denoised": score_pair(clean, denoise_fn(noisy)),
+        denoised = denoise_fn(noisy)
+        after_noisy()
+        row = {**row, "denoised": score_pair(clean, denoised),
                "clean->model": score_pair(clean, denoise_fn(clean))}
         for name, s in row.items():
             scores.setdefault(name, []).append(s)
@@ -156,10 +160,12 @@ def main():
         cache = CACHE_PATH if (args.split, args.every) == ("test", 1) else \
             CACHE_PATH.replace(".json", f"_{args.split}_{args.every}.json")
         cached = load_cache(key, cache)
+        meter = CostMeter(model)  # counts a spiking model's spikes on the noisy clips
         results, fixed = evaluate_model(lambda wav: denoise(model, wav, model_cfg, device),
-                                        load_pairs(files, args.num_clips, sr, every=args.every), cached)
+                                        load_pairs(files, args.num_clips, sr, every=args.every), cached, meter.add)
         if len(fixed) > len(cached):
             save_cache(key, fixed, cache)
+        print(f"  cost: {describe_cost(meter.cost(), model_cfg)}")
     else:
         samples_dir = args.samples_dir or resolve_path(cfg["train"]["output_dir"]) / "samples"
         print(f"Evaluating samples in {samples_dir}...")

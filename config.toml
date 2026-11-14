@@ -24,7 +24,8 @@ long_factor = 10 # Extra input from a window n_fft * long_factor samples long; 0
 causal = true # Frames only see the past (needed live); false = centred frames
 
 [model]
-type = "mlp" # "mlp" (Multilayer Perceptron: each frame on its own) or "tcn" (Temporal Convolutional Network: convolutions over the past frames, see [tcn])
+type = "mlp" # "mlp" (Multilayer Perceptron: each frame on its own), "tcn" (Temporal Convolutional Network: convolutions over the past frames, see [tcn])
+             # or "snn" (spiking network that remembers the past in its neurons, see [snn]; train it with train_pesq.py)
 hidden = [1024, 1024] # mlp only: hidden layer sizes
 output = "magnitude" # "magnitude" or "mask" (gain 0..1; both reuse the noisy phase), or "complex_mask" (also fixes phase)
 compress = 0.3 # complex_mask only: magnitude exponent, squeezes the range like log1p
@@ -39,6 +40,19 @@ filterbank = "" # a filterbank.pt from train_filterbank.py: its frozen encoder/d
 channels = 256
 kernel = 3 # frames per convolution
 dilations = [1, 2, 4, 8, 16, 32] # one residual block each; sees 1 + (kernel - 1) * sum(dilations) frames
+
+[snn]
+# Spiking network (denoiser/snn): layers of leaky integrate-and-fire neurons that send spikes (0 or 1) to
+# the next layer, then a readout layer that doesn't spike. One time step per frame unless steps_per_frame > 1
+hidden = [256, 256, 256] # neurons of each spiking layer
+recurrent = false # each layer also gets its own spikes of the step before
+decay = 0.9 # share of a neuron's membrane potential kept per time step, at the start; 0 = no memory
+readout_decay = 0.5 # the same for the readout layer: higher = smoother output over time
+learn_decay = true # every neuron learns its own decay
+threshold = 1.0 # membrane potential at which a neuron spikes
+surrogate_slope = 25 # steepness of the stand-in gradient of a spike; higher = only neurons near the threshold learn
+steps_per_frame = 1 # time steps per frame, all with the same input; more = finer spike timing at that many times the cost
+rate_weight = 0.0 # train_pesq.py: loss weight on the mean spikes per neuron per step, for fewer spikes; 0 = off
 
 [train]
 epochs = 10

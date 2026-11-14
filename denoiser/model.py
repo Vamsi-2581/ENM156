@@ -8,9 +8,10 @@ import torch
 from .config import MODEL_SECTIONS, merge, resolve_path
 from .nets import MLP, TCN
 from .filterbank import describe_filterbank
+from .snn.nets import LIFNet
 from .pipeline import check_stft, filterbank, hop, io_sizes, is_complex, n_freq, out_activation
 
-MODEL_TYPES = ("mlp", "tcn")
+MODEL_TYPES = ("mlp", "tcn", "snn")
 
 
 def model_type(cfg):
@@ -28,6 +29,11 @@ def make_model(cfg):
         tcn = cfg["tcn"]
         model = TCN(n_in, n_out, tcn["channels"], tcn["kernel"], tuple(tcn["dilations"]), act)
         last = model.out
+    elif model_type(cfg) == "snn":
+        snn = cfg["snn"]
+        model = LIFNet(n_in, n_out, tuple(snn["hidden"]), snn["recurrent"], snn["decay"], snn["readout_decay"],
+                       snn["learn_decay"], snn["threshold"], snn["surrogate_slope"], snn["steps_per_frame"], act)
+        last = model
     else:
         model = MLP(n_in, n_out, tuple(cfg["model"]["hidden"]), act)
         last = model.net[-2]
@@ -50,6 +56,11 @@ def describe_net(cfg):
         return (f"tcn {n_in} -> {tcn['channels']} channels x {len(tcn['dilations'])} blocks "
                 f"(dilations {tcn['dilations']}) -> {n_out}, sees {history + 1} frames "
                 f"({ms:.0f} ms of history)")
+    if model_type(cfg) == "snn":
+        snn = cfg["snn"]
+        return (f"snn {n_in} -> {' -> '.join(map(str, snn['hidden']))} spiking neurons"
+                f"{' (recurrent)' if snn['recurrent'] else ''} -> {n_out}, "
+                f"{snn['steps_per_frame']} time step(s) per frame")
     return f"mlp {n_in} -> {' -> '.join(map(str, cfg['model']['hidden']))} -> {n_out}"
 
 

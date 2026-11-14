@@ -12,7 +12,7 @@ import torch
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL_CONFIG = ROOT / "config.local.toml"
-MODEL_SECTIONS = ("stft", "model", "tcn")  # what a checkpoint stores: needed to rebuild the model
+MODEL_SECTIONS = ("stft", "model", "tcn", "snn")  # what a checkpoint stores: needed to rebuild the model
 
 
 def merge(base, overrides):
