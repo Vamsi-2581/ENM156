@@ -12,6 +12,9 @@ val_dir = "" # folder with val-*.parquet; "" = voicebank_dir, which has none, so
              # (the test set itself) is used for validation
 test_dir = "" # folder with test-*.parquet; "" = voicebank_dir
 sample_rate = 16000 # Hz
+audio_cache = "runs/audio_cache" # train_pesq.py: the decoded training audio is written here once (VoiceBank: ~9 GB) and
+                                 # shared by every run, so runs side by side need its RAM only once; "" = each
+                                 # run loads its own copy into RAM instead
 device = "" # "" = cuda if available, else cpu
 audio_device = "" # train.py: where the training audio is kept: "" = same as device, "cpu" saves VRAM
 vram_fraction = 0.9 # share of the GPU's memory PyTorch may use: the rest is left for the desktop when
@@ -52,6 +55,10 @@ learn_decay = true # every neuron learns its own decay
 threshold = 1.0 # membrane potential at which a neuron spikes
 surrogate_slope = 25 # steepness of the stand-in gradient of a spike; higher = only neurons near the threshold learn
 steps_per_frame = 1 # time steps per frame, all with the same input; more = finer spike timing at that many times the cost
+skip = false # each layer's input current is also added to the next layer's (where they have the same size); helps deep networks train
+norm = false # batch normalisation of each layer's input current; a fixed scale and shift per neuron once trained
+init_gain = 1.0 # scales the starting weights of the layers fed by spikes; 1 leaves deep layers nearly silent at the start
+spiking = true # false: smooth neurons instead of spikes; not a spiking network, only a control for what spikes cost in quality
 rate_weight = 0.0 # train_pesq.py: loss weight on the mean spikes per neuron per step, for fewer spikes; 0 = off
 
 [train]

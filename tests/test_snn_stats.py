@@ -58,6 +58,33 @@ def main():
         total = sum(net.stats["spikes"]) / (net.stats["frames"] * steps * 14)
         checks[f"{steps} step(s): spike_rate"] = close(net.spike_rate.item(), total)
 
+    # pruned input weights: no current through them, no MACs counted, no gradient step moves them back
+    net = LIFNet(10, 4, hidden=(8, 6), threshold=0.1)
+    net.input_mask[:, :5] = 0  # inputs 0-4 removed
+    x = torch.randn(2, 7, 10)
+    changed = x.clone()
+    changed[..., :5] += 1
+    with torch.no_grad():
+        checks["pruned inputs are ignored"] = torch.equal(net(x), net(changed))
+        meter = CostMeter(net)
+        meter.add()
+    checks["pruned MACs"] = meter.cost()["macs"] == 5 * 8 + 18
+    net(x).sum().backward()
+    checks["pruned weights get no gradient"] = not net.inputs[0].weight.grad[:, :5].any()
+    fresh = LIFNet(10, 4, hidden=(8, 6))
+    fresh.load_state_dict(net.state_dict())
+    checks["mask is saved"] = torch.equal(fresh.input_mask, net.input_mask)
+
+    # skip connections: one more addition per neuron of layers 2.. and time step
+    plain, skip = LIFNet(10, 4, hidden=(8, 8, 8), threshold=0.1), LIFNet(10, 4, hidden=(8, 8, 8), threshold=0.1, skip=True)
+    with torch.no_grad():
+        skip.load_state_dict(plain.state_dict())
+        skip(x)
+        meter = CostMeter(skip)
+        meter.add()
+    by_spikes = sum(s * f for s, f in zip(meter.spikes, fan_out(skip))) / meter.frames
+    checks["skip additions"] = close(meter.cost()["synops"], by_spikes + 16)
+
     for name, ok in checks.items():
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
     sys.exit(0 if all(checks.values()) else 1)

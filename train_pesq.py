@@ -106,13 +106,17 @@ def main():
         torch.manual_seed(tr["seed"])
     device = get_device(cfg)
     print(f"Using device: {describe_device(device)}")
+    rate_weight = cfg["snn"]["rate_weight"]
     model, cfg = initial_model(cfg, device, cfg["pesq"]["init_from"])
+    cfg["snn"]["rate_weight"] = rate_weight  # a setting of the loss, not of the checkpoint's model
     print_config(cfg, ("stft", "model", *(("snn",) if cfg["model"]["type"] == "snn" else ()), "train", "pesq"))
     print(describe_model(cfg))
 
     print(f"Loading up to {tr['max_train'] or 'all'} train and {tr['max_val'] or 'all'} val clips...")
     crop = round(cfg["pesq"]["crop_seconds"] * sr)
-    train = load_crops(split_files(cfg, "train"), tr["max_train"], sr, crop, tr["train_every"])
+    cache = cfg["data"]["audio_cache"]
+    train = load_crops(split_files(cfg, "train"), tr["max_train"], sr, crop, tr["train_every"],
+                       resolve_path(cache) if cache else None)
     val = list(load_pairs(split_files(cfg, "val"), tr["max_val"], sr, every=tr["val_every"]))
     hours = sum(len(n) for n, _ in train) / sr / 3600
     print(f"  train clips: {len(train)} of at least {cfg['pesq']['crop_seconds']} s "
