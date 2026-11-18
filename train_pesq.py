@@ -100,7 +100,8 @@ def main():
     out_dir = resolve_path(tr["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     log_output(out_dir / "log.txt", cfg["pesq"]["init_from"])
-
+    grad_clip = float(tr.get("grad_clip", 0.0))
+  
     if tr["seed"] >= 0:
         random.seed(tr["seed"])
         torch.manual_seed(tr["seed"])
@@ -146,6 +147,8 @@ def main():
                 skipped += 1
                 continue
             loss.backward()
+          if grad_clip > 0.0:
+              torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             opt.step()
             total_loss += loss.item()
             for name, value in terms.items():
