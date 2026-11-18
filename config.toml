@@ -89,6 +89,7 @@ save_checkpoints = 2 # besides the final model.pt, after each epoch: 0 = nothing
                      # 2 = the best so far (best.pt), 3 = the 3 best (best_epoch_NNN.pt); "best" = val_loss
                      # in train.py, val_PESQ in train_pesq.py
 init_from = "" # train.py: a model.pt to continue training from; "" = start fresh
+grad_clip = 0.0 # 0.0 disables gradient norm clipping
 
 [filterbank]
 # A learned encoder/decoder that can replace the STFT (denoiser/filterbank.py). train_filterbank.py
