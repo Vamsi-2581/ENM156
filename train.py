@@ -75,7 +75,8 @@ def main():
 
     print(f"  {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters")
     opt = torch.optim.Adam(model.parameters(), lr=tr["lr"])
-
+    grad_clip = float(tr.get("grad_clip", 0.0))
+  
     saver = CheckpointSaver(tr["save_checkpoints"], out_dir, higher_is_better=False)
     crop, history = tr["crop_frames"], model.context - 1
     crops_per_batch = max(1, tr["batch_size"] // crop)
@@ -94,6 +95,8 @@ def main():
             # one output per crop frame; the history frames are only looked at
             loss = loss_fn(model.forward_valid(x), x[:, history:], y, cfg)
             loss.backward()
+          if grad_clip > 0.0:
+              torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             opt.step()
             total_loss += loss.item() * len(c)
         train_loss = total_loss / len(clips)
